@@ -112,7 +112,11 @@
 
   <div id="optpane" style="display:none">
     <div class="refresh-row">
-      <select id="optsym" aria-label="Ticker"></select>
+      <label style="font-size:.78rem;color:var(--ink-soft);display:flex;align-items:center;gap:.3rem">Source
+        <select id="optsrc" aria-label="Source screen"></select></label>
+      <select id="optsym" aria-label="Ticker from source"></select>
+      <input id="optfree" type="text" placeholder="or type any ticker (e.g. DX)" aria-label="Any ticker"
+        style="height:34px;padding:0 .6rem;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;width:210px;max-width:50vw">
       <button id="optload" class="rbtn">Load option chain</button>
       <span class="rprog" id="optstat" role="status" aria-live="polite"></span>
     </div>
@@ -138,7 +142,7 @@ const TABS=[
   {id:"swing",label:"Swing setups",ctx:"% vs 20d avg",data:DS.swing,rsi:true,cross:true,
    note:"Broad-market swing scan: "+DS.swing.length+" US stocks (\u2265$1B) where RSI(14) has recovered into 30\u201345 while price is at or below the lower Bollinger band \u2014 oversold-bounce setups, independent of 52-week lows. RSI arrows: \u2191 30 = crossed back up above 30 (recovering), \u2193 30 = dipped below 30 in the last ~5 sessions. '% vs 20d avg' is distance from the band's midline."},
   {id:"options",label:"Options",opt:true,
-   note:"Live option chain for any Swing-tab name, at the longest-dated (LEAPS) expiration listed — calls and puts around the money with premium (bid/ask and mid), implied volatility, delta and open interest. Pick a ticker and click Load; pulled live from Webull, so open this page in claude.ai with the connector. Premium ×100 = dollars per contract. Not investment advice."},
+   note:"Live option chain at the longest-dated (LEAPS) expiration listed — calls and puts around the money with premium (bid/ask and mid), implied volatility, delta and open interest. Choose a Source screen and ticker, or type ANY symbol (e.g. DX), then Load. Pulled live from Webull, so open this page in claude.ai with the connector. Premium ×100 = dollars per contract. Not investment advice."},
 ];
 TABS.forEach(t=>t.ctxType=({sp100:"high",highmom:"high",lows:"low",sp500low:"low",swing:"swing"})[t.id]);
 let cur=TABS[0], sortKey="comp", sortDir=-1, fq="", fExch="", fCap=0, fMinC=0, fSP=false, fXd=false, fXU=false, fBB=false;
@@ -348,9 +352,13 @@ function rescan(){
   else{prog.textContent="Ask Claude in chat: "+msg;}
 }
 /* ---------- Options tab: live chain via Webull MCP ---------- */
+const OPTSRC=[["swing","Swing setups"],["sp500low","S&P 500 lows"],["lows","US 52-wk lows"],["highmom","US high momentum"],["sp100","S&P 100"]];
+let optSrcFilled=false;
 function populateOptSyms(){
-  const sel=$("optsym"); const sw=DS.swing||[];
-  sel.innerHTML=sw.map(r=>`<option value="${r.sym}">${r.sym}${r.name?" — "+r.name:""}</option>`).join("");
+  const srcSel=$("optsrc");
+  if(!optSrcFilled){ srcSel.innerHTML=OPTSRC.filter(s=>DS[s[0]]&&DS[s[0]].length).map(s=>`<option value="${s[0]}">${s[1]}</option>`).join(""); optSrcFilled=true; }
+  const rows=DS[srcSel.value||"swing"]||[];
+  $("optsym").innerHTML=rows.map(r=>`<option value="${r.sym}">${r.sym}${(r.name&&r.name!==r.sym)?" — "+r.name:""}</option>`).join("");
 }
 let optLoading=false;
 async function loadChain(sym){
@@ -414,7 +422,9 @@ function renderChain(sym,P,exp,strikes,bk,q){
     `<tr><th>OI</th><th>IV</th><th>δ</th><th>Bid</th><th>Ask</th><th>Prem</th><th>·</th><th>Prem</th><th>Bid</th><th>Ask</th><th>δ</th><th>IV</th><th>OI</th></tr>`+
     `</thead><tbody>${rows}</tbody></table></div>`;
 }
-$("optload").addEventListener("click",()=>loadChain($("optsym").value));
+$("optsrc").addEventListener("change",populateOptSyms);
+$("optfree").addEventListener("keydown",e=>{if(e.key==="Enter"){const f=$("optfree").value.trim().toUpperCase();if(f)loadChain(f);}});
+$("optload").addEventListener("click",()=>{const f=$("optfree").value.trim().toUpperCase();loadChain(f||$("optsym").value);});
 $("refreshBtn").addEventListener("click",()=>refreshTab(cur));
 $("rescanBtn").addEventListener("click",rescan);
 initMcp();
