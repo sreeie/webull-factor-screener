@@ -1,0 +1,5 @@
+scans/
+factor-screen-dashboard.html
+__pycache__/
+*.pyc
+_chk.js
