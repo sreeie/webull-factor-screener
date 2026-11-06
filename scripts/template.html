@@ -379,19 +379,22 @@ async function loadChain(sym){
     if(!exps.length){ st.textContent="No listed options for "+sym+"."; return; }
     const MAXEXP=exps[exps.length-1];
     st.textContent="Loading "+MAXEXP+" chain…";
-    const lo2=Math.max(1,Math.round(P*0.7)), hi2=Math.round(P*1.3);
+    const lo2=Math.max(1,Math.round(P*0.4)), hi2=Math.round(P*2.6);
     const chr=await ns.callTool("Webull","get_option_contracts",{category:"US_OPTION",underlying_symbols:sym,start_date:MAXEXP,strike_price_gte:String(lo2),strike_price_lte:String(hi2),page_size:1000},{cache:false});
     const chc=arrp(chr).filter(c=>c.expiration_date===MAXEXP);
     if(!chc.length){ st.textContent="No strikes near the money for "+MAXEXP+"."; return; }
-    const bk={}; const osyms=[];
-    chc.forEach(c=>{const k=(+c.strike_price).toFixed(2);(bk[k]=bk[k]||{})[c.option_type==="PUT"?"put":"call"]=c.symbol;osyms.push(c.symbol);});
+    const bk={};
+    chc.forEach(c=>{const k=(+c.strike_price).toFixed(2);(bk[k]=bk[k]||{})[c.option_type==="PUT"?"put":"call"]=c.symbol;});
+    let strikes=Object.keys(bk).map(Number);
+    strikes.sort((a,b)=>Math.abs(a-P)-Math.abs(b-P)); strikes=strikes.slice(0,31).sort((a,b)=>a-b);
+    const osyms=[]; strikes.forEach(s=>{const b2=bk[s.toFixed(2)]||{}; if(b2.call)osyms.push(b2.call); if(b2.put)osyms.push(b2.put);});
     const q={}; const batches=chunk(osyms,20); let done=0;
     for(const b of batches){
       const r=await ns.callTool("Webull","get_option_snapshot",{symbols:b.join(","),category:"US_OPTION"},{cache:false});
       arrp(r).forEach(o=>{if(o&&o.symbol)q[o.symbol]=o;});
       done++; st.textContent="Loading quotes "+done+"/"+batches.length+"…";
     }
-    renderChain(sym,P,MAXEXP,Object.keys(bk).map(Number).sort((a,b)=>a-b),bk,q);
+    renderChain(sym,P,MAXEXP,strikes,bk,q);
     st.textContent="";
   }catch(e){
     const code=e&&e.code; let m="Couldn't load the chain — please retry.";
