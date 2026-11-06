@@ -130,7 +130,7 @@ def g(v, nd=2):
 trs = "".join(
     f"<tr data-t='{r['type']}'><td class='l sym'>{r['u']}</td><td class='l'>{r['exp']}</td><td>{g(r['dte'],0)}</td>"
     f"<td class='l'><span class='tag {r['type'].lower()}'>{r['type']}</span></td>"
-    f"<td>{g(r['rich'],1)}</td><td class='b'>{g(r['richbid'])}</td><td>{g(r['richmid'])}</td>"
+    f"<td class='rich'>{g(r['rich'],1)}</td><td class='b rich'>{g(r['richbid'])}</td><td class='rich'>{g(r['richmid'])}</td>"
     f"<td>{g(r['oi'],0)}</td><td>{('' if r['iv'] is None else str(round(r['iv']*100))+'%')}</td>"
     f"<td>{g(r['ref'],1)}</td><td>{g(r['refbid'])}</td><td class='b'>{g(r['gap'])}</td></tr>"
     for r in rows)
@@ -154,6 +154,7 @@ HTML = f"""<meta name="claude:viewport-fit-sides" content="cover"><title>Option 
  th{{position:sticky;top:0;background:var(--surface);font-size:.64rem;text-transform:uppercase;letter-spacing:.03em;color:var(--soft);text-align:right;padding:.5rem .55rem;border-bottom:1px solid var(--ls);white-space:nowrap}}
  td{{padding:.34rem .55rem;border-bottom:1px solid var(--line);font-family:var(--fn);font-size:.78rem;text-align:right;white-space:nowrap}}
  th.l,td.l{{text-align:left}} td.sym{{font-family:var(--fu);font-weight:600}} td.b{{font-weight:600}}
+ td.rich{{background:rgba(255,206,0,.22)}}
  .tag{{font-family:var(--fu);font-size:.62rem;font-weight:600;padding:.08rem .35rem;border-radius:5px}} .tag.call{{background:rgba(27,158,89,.16);color:var(--green)}} .tag.put{{background:rgba(192,57,43,.14);color:var(--danger)}}
  .meth{{margin-top:1rem;font-size:.78rem;color:var(--soft);line-height:1.55}}
 </style>
