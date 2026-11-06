@@ -70,6 +70,15 @@
   .rbtn.ghost{background:transparent;color:var(--accent)}
   .rbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .asof{font-size:.76rem;color:var(--ink-faint);font-family:var(--font-num)} .rprog{font-size:.78rem;color:var(--ink-soft)}
+  #optsym{height:34px;padding:0 .5rem;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;min-width:220px;max-width:60vw}
+  .opthdr{margin:.1rem 0 .7rem;font-size:.92rem;font-family:var(--font-num)}
+  table.chain{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  .chain th{position:sticky;top:0;background:var(--surface);font-size:.64rem;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);font-weight:600;text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+  .chain td{padding:.3rem .5rem;border-bottom:1px solid var(--line);font-family:var(--font-num);font-size:.76rem;text-align:right;white-space:nowrap}
+  .chain td.strike{text-align:center;font-weight:600;background:var(--accent-soft);color:var(--accent)}
+  .chain td.prem{font-weight:600}
+  .chain tr.atm td{background:rgba(142,163,240,.14)} .chain tr.atm td.strike{background:var(--accent);color:var(--surface)}
+  .chain th.callhd{color:#1b9e59} .chain th.puthd{color:var(--danger)}
   @media (max-width:640px){ h1{font-size:1.3rem} .wrap{padding-block:1.25rem 2.5rem} .nm{display:none} }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
@@ -101,6 +110,15 @@
   </div>
   <div class="tablewrap"><table id="tbl"><thead><tr id="hrow"></tr></thead><tbody id="body"></tbody></table></div>
 
+  <div id="optpane" style="display:none">
+    <div class="refresh-row">
+      <select id="optsym" aria-label="Ticker"></select>
+      <button id="optload" class="rbtn">Load option chain</button>
+      <span class="rprog" id="optstat" role="status" aria-live="polite"></span>
+    </div>
+    <div id="optout"></div>
+  </div>
+
   <div class="meth">
     <p><b>Factors</b> (0&ndash;100 rank within the active screen): <b>Growth</b> = EPS momentum. <b>Value</b> = cheapness across P/E, P/B, P/S. <b>Quality</b> = ROE proxy. <b>Momentum</b> = position in the 52-week range. <b>Income</b> = dividend-yield rank. <b>Comp</b> = equal-weight average. <b>RSI</b> = 14-day Wilder RSI from daily closes; shaded red below 30; <code>&darr;30</code> marks a fresh cross down from &ge;30 to &lt;30 (entering oversold) and <code>&uarr;30</code> a cross back up from &lt;30 to &ge;30 (recovering), within the last ~5 sessions. <b>Bollinger Bands(20,2)</b> give the lower / middle / upper price lines (20-day average &plusmn;2 standard deviations); <b>%B</b> places the last close in that band (0 = lower line, 50 = middle, 100 = upper, below 0 = under the lower band &mdash; the oversold edge). The context column is <b>% from 52-week high</b> on the high screens and <b>% off 52-week low</b> on the low screens.</p>
     <p>Source: Webull screens, snapshots &amp; daily bars, deduplicated. $1B+ cap floor on the high/low screens. Fast snapshot method, so Growth and Quality are proxies. RSI computed only for the low-side screens (where &lt;30 is meaningful).</p>
@@ -119,6 +137,8 @@ const TABS=[
    note:"The "+DS.sp500low.length+" S&P 500 members near their 52-week lows, with RSI(14) \u2014 beaten-down blue chips; watch for fresh crosses below or back above 30."},
   {id:"swing",label:"Swing setups",ctx:"% vs 20d avg",data:DS.swing,rsi:true,cross:true,
    note:"Broad-market swing scan: "+DS.swing.length+" US stocks (\u2265$1B) where RSI(14) has recovered into 30\u201345 while price is at or below the lower Bollinger band \u2014 oversold-bounce setups, independent of 52-week lows. RSI arrows: \u2191 30 = crossed back up above 30 (recovering), \u2193 30 = dipped below 30 in the last ~5 sessions. '% vs 20d avg' is distance from the band's midline."},
+  {id:"options",label:"Options",opt:true,
+   note:"Live option chain for any Swing-tab name, at the longest-dated (LEAPS) expiration listed — calls and puts around the money with premium (bid/ask and mid), implied volatility, delta and open interest. Pick a ticker and click Load; pulled live from Webull, so open this page in claude.ai with the connector. Premium ×100 = dollars per contract. Not investment advice."},
 ];
 TABS.forEach(t=>t.ctxType=({sp100:"high",highmom:"high",lows:"low",sp500low:"low",swing:"swing"})[t.id]);
 let cur=TABS[0], sortKey="comp", sortDir=-1, fq="", fExch="", fCap=0, fMinC=0, fSP=false, fXd=false, fXU=false, fBB=false;
@@ -129,6 +149,14 @@ function setTab(id,push){
   cur=TABS.find(t=>t.id===id)||TABS[0];
   $("tabs").querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.id===cur.id));
   $("tabnote").textContent=cur.note;
+  if(push){ try{history.replaceState(null,"","#"+cur.id);}catch(e){} }
+  const isopt=!!cur.opt;
+  $("optpane").style.display=isopt?"block":"none";
+  document.querySelector(".controls").style.display=isopt?"none":"flex";
+  document.querySelector(".tablewrap").style.display=isopt?"none":"";
+  $("tiles").style.display=isopt?"none":"grid";
+  document.querySelector(".refresh-row").style.display=isopt?"none":"flex";
+  if(isopt){ populateOptSyms(); return; }
   const exchs=[...new Set(cur.data.map(r=>r.exch))].filter(Boolean).sort();
   $("exch").innerHTML=`<option value="">all exchanges</option>`+exchs.map(e=>`<option value="${e}">${e}</option>`).join("");
   fExch=""; sortKey="comp"; sortDir=-1; fXd=false; $("xd").checked=false; fXU=false; $("xu").checked=false; fBB=false; $("bb").checked=false;
@@ -319,6 +347,74 @@ function rescan(){
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(msg).then(ok,()=>{prog.textContent="Ask Claude in chat: "+msg;});}
   else{prog.textContent="Ask Claude in chat: "+msg;}
 }
+/* ---------- Options tab: live chain via Webull MCP ---------- */
+function populateOptSyms(){
+  const sel=$("optsym"); const sw=DS.swing||[];
+  sel.innerHTML=sw.map(r=>`<option value="${r.sym}">${r.sym}${r.name?" — "+r.name:""}</option>`).join("");
+}
+let optLoading=false;
+async function loadChain(sym){
+  if(optLoading)return;
+  const out=$("optout"), st=$("optstat");
+  const ns=await initMcp();
+  if(!ns){ st.textContent="Open this page in claude.ai with the Webull connector to load option chains."; return; }
+  optLoading=true; $("optload").disabled=true; out.innerHTML=""; st.textContent="Loading "+sym+"…";
+  const arrp=r=>{let a=r&&r.payload; if(!Array.isArray(a))a=(a&&a.data)||[]; return a;};
+  try{
+    const sres=await ns.callTool("Webull","get_stock_snapshot",{symbols:sym,category:"US_STOCK",extend_hour_required:false,overnight_required:false},{cache:false});
+    const sarr=arrp(sres); const P=sarr.length?num(sarr[0].price):null;
+    if(!P){ st.textContent="No quote for "+sym+"."; return; }
+    st.textContent="Finding expirations…";
+    const lo1=Math.max(1,Math.round(P*0.97)), hi1=Math.round(P*1.03)+1;
+    const cres=await ns.callTool("Webull","get_option_contracts",{category:"US_OPTION",underlying_symbols:sym,direction:"CALL",strike_price_gte:String(lo1),strike_price_lte:String(hi1),page_size:1000},{cache:false});
+    const exps=[...new Set(arrp(cres).map(c=>c.expiration_date).filter(Boolean))].sort();
+    if(!exps.length){ st.textContent="No listed options for "+sym+"."; return; }
+    const MAXEXP=exps[exps.length-1];
+    st.textContent="Loading "+MAXEXP+" chain…";
+    const lo2=Math.max(1,Math.round(P*0.7)), hi2=Math.round(P*1.3);
+    const chr=await ns.callTool("Webull","get_option_contracts",{category:"US_OPTION",underlying_symbols:sym,start_date:MAXEXP,strike_price_gte:String(lo2),strike_price_lte:String(hi2),page_size:1000},{cache:false});
+    const chc=arrp(chr).filter(c=>c.expiration_date===MAXEXP);
+    if(!chc.length){ st.textContent="No strikes near the money for "+MAXEXP+"."; return; }
+    const bk={}; const osyms=[];
+    chc.forEach(c=>{const k=(+c.strike_price).toFixed(2);(bk[k]=bk[k]||{})[c.option_type==="PUT"?"put":"call"]=c.symbol;osyms.push(c.symbol);});
+    const q={}; const batches=chunk(osyms,20); let done=0;
+    for(const b of batches){
+      const r=await ns.callTool("Webull","get_option_snapshot",{symbols:b.join(","),category:"US_OPTION"},{cache:false});
+      arrp(r).forEach(o=>{if(o&&o.symbol)q[o.symbol]=o;});
+      done++; st.textContent="Loading quotes "+done+"/"+batches.length+"…";
+    }
+    renderChain(sym,P,MAXEXP,Object.keys(bk).map(Number).sort((a,b)=>a-b),bk,q);
+    st.textContent="";
+  }catch(e){
+    const code=e&&e.code; let m="Couldn't load the chain — please retry.";
+    if(code==="needs_reauth")m="Reconnect Webull in claude.ai → Settings → Connectors, then retry.";
+    else if(code==="server_not_connected"||code==="not_granted"||code==="not_in_manifest")m="Enable the Webull connector for this page, then retry.";
+    else if(code==="consent_required"||code==="approval_required")m="Allow Webull for this page when claude.ai asks, then retry.";
+    else if(code==="rate_limited"||code==="server_unavailable")m="Webull is busy — wait a moment and retry.";
+    st.textContent=m;
+  }finally{ optLoading=false; $("optload").disabled=false; }
+}
+function renderChain(sym,P,exp,strikes,bk,q){
+  const days=Math.max(0,Math.round((new Date(exp+"T00:00:00Z")-Date.now())/864e5));
+  const mid=o=>{const b=num(o&&o.bid),a=num(o&&o.ask);return (b!=null&&a!=null)?(b+a)/2:num(o&&o.price);};
+  const C=o=>{if(!o)return {oi:"",iv:"",d:"",bid:"",ask:"",prem:""};
+    const m=mid(o);return {oi:o.open_interest||"",iv:(num(o.imp_vol)!=null?(num(o.imp_vol)*100).toFixed(0)+"%":""),
+      d:(num(o.delta)!=null?num(o.delta).toFixed(2):""),bid:(num(o.bid)!=null?(+o.bid).toFixed(2):""),
+      ask:(num(o.ask)!=null?(+o.ask).toFixed(2):""),prem:(m!=null?m.toFixed(2):"")};};
+  let atm=strikes[0]; strikes.forEach(s=>{if(Math.abs(s-P)<Math.abs(atm-P))atm=s;});
+  const rows=strikes.map(s=>{
+    const k=s.toFixed(2); const b=bk[k]||{}; const c=C(q[b.call]), p=C(q[b.put]);
+    return `<tr${s===atm?' class="atm"':''}><td>${c.oi}</td><td>${c.iv}</td><td>${c.d}</td><td>${c.bid}</td><td>${c.ask}</td><td class="prem">${c.prem}</td>`+
+      `<td class="strike">${s.toFixed(1)}</td>`+
+      `<td class="prem">${p.prem}</td><td>${p.bid}</td><td>${p.ask}</td><td>${p.d}</td><td>${p.iv}</td><td>${p.oi}</td></tr>`;
+  }).join("");
+  $("optout").innerHTML=`<div class="opthdr"><b>${sym}</b> &nbsp;$${P.toFixed(2)}&nbsp; · &nbsp;exp <b>${exp}</b> (${days}d, longest listed) · ATM strike highlighted</div>`+
+    `<div class="tablewrap"><table class="chain"><thead>`+
+    `<tr><th class="callhd" colspan="6">Calls</th><th>Strike</th><th class="puthd" colspan="6">Puts</th></tr>`+
+    `<tr><th>OI</th><th>IV</th><th>δ</th><th>Bid</th><th>Ask</th><th>Prem</th><th>·</th><th>Prem</th><th>Bid</th><th>Ask</th><th>δ</th><th>IV</th><th>OI</th></tr>`+
+    `</thead><tbody>${rows}</tbody></table></div>`;
+}
+$("optload").addEventListener("click",()=>loadChain($("optsym").value));
 $("refreshBtn").addEventListener("click",()=>refreshTab(cur));
 $("rescanBtn").addEventListener("click",rescan);
 initMcp();
