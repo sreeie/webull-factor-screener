@@ -160,8 +160,8 @@ HTML = f"""<meta name="claude:viewport-fit-sides" content="cover"><title>Option 
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
 <div class="wrap">
- <h1>Option Premium Inversions &mdash; S&amp;P 500 lows</h1>
- <p class="sub">Strikes where the normal premium ladder is violated, on live Webull quotes ({ASOF}). <b>Calls</b>: a higher strike whose bid tops the adjacent lower strike. <b>Puts</b>: a lower strike whose bid tops the adjacent higher strike. Only the richer leg with <b>bid &gt; 0 and open interest &gt; 0</b> is kept (dead one-sided quotes filtered out). Ranked by the bid gap. Live Webull data; not investment advice.</p>
+ <h1>Option Premium Inversions &mdash; S&amp;P 500 lows (longest-dated expiry)</h1>
+ <p class="sub">Each scanned name's <b>longest-dated expiration only</b>; only names that actually have an inversion are listed. Strikes where the normal premium ladder is violated, on live Webull quotes ({ASOF}). <b>Calls</b>: a higher strike whose bid tops the adjacent lower strike. <b>Puts</b>: a lower strike whose bid tops the adjacent higher strike. Only the richer leg with <b>bid &gt; 0 and open interest &gt; 0</b> is kept (dead one-sided quotes filtered out). Ranked by the bid gap. Live Webull data; not investment advice.</p>
  <div class="tiles">
   <div class="tile"><div class="l">Inversions</div><div class="v">{len(rows)}</div></div>
   <div class="tile"><div class="l">Calls</div><div class="v">{ncall}</div></div>

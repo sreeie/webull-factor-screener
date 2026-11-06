@@ -20,17 +20,18 @@ Call `get_stock_snapshot` once (or twice) with all the tickers as a comma string
 (`category:"US_STOCK", extend_hour_required:false, overnight_required:false`, ≤100 per call).
 From the result build a price map `ticker -> price`. (The result auto-saves; read it with jq/python.)
 
-## Step 2 — option contracts per ticker (strikes within ~30% of spot, ALL expirations)
-For each ticker T with price P, call:
-```
-get_option_contracts {category:"US_OPTION", underlying_symbols:T,
-  strike_price_gte: round(P*0.7), strike_price_lte: round(P*1.3), page_size:1000}
-```
-The result prints a saved PATH — copy it to `scans/opt_<T>.json`:
-```
-cp "<PATH>" scans/opt_<T>.json
-```
-Do all ~91. Skip a ticker only if it errors (note which).
+## Step 2 — option contracts per ticker (LONGEST-dated expiry ONLY, strikes within ~20% of spot)
+For each ticker T with price P:
+ (a) Find the furthest expiration — call with a tight ATM band so one page lists every expiry:
+     `get_option_contracts {category:"US_OPTION", underlying_symbols:T, direction:"CALL",
+       strike_price_gte: round(P*0.97), strike_price_lte: round(P*1.03)+1, page_size:1000}`
+     Let MAXEXP = the latest `expiration_date` in the result.
+ (b) Pull ONLY that expiry's near-the-money chain (calls + puts):
+     `get_option_contracts {category:"US_OPTION", underlying_symbols:T, start_date: MAXEXP,
+       strike_price_gte: round(P*0.8), strike_price_lte: round(P*1.2), page_size:1000}`
+     Copy the saved PATH to `scans/opt_<T>.json`:  `cp "<PATH>" scans/opt_<T>.json`
+Do all ~91 (skip a ticker only if it errors; note which). One expiry per name keeps the whole
+scan inside a single run.
 
 ## Step 3 — option quotes
 Collect EVERY option `symbol` from all `scans/opt_*.json`. Call `get_option_snapshot`
