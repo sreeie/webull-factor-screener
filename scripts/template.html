@@ -119,6 +119,7 @@
       <input id="optfree" type="text" placeholder="or type any ticker (e.g. DX)" aria-label="Any ticker"
         style="height:34px;padding:0 .6rem;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;width:210px;max-width:50vw">
       <button id="optload" class="rbtn">Load option chain</button>
+      <button id="optscan" class="rbtn ghost" title="Scan every name in the selected source for premium inversions at its longest-dated expiry and show the chains inline">Scan source for inversions</button>
       <span class="rprog" id="optstat" role="status" aria-live="polite"></span>
     </div>
     <div id="optout"></div>
@@ -361,9 +362,9 @@ function populateOptSyms(){
   const rows=DS[srcSel.value||"swing"]||[];
   $("optsym").innerHTML=rows.map(r=>`<option value="${r.sym}">${r.sym}${(r.name&&r.name!==r.sym)?" — "+r.name:""}</option>`).join("");
 }
-let optLoading=false;
+let optLoading=false, optScan=false, optScanStop=false;
 async function loadChain(sym){
-  if(optLoading)return;
+  if(optLoading||optScan)return;
   const out=$("optout"), st=$("optstat");
   const ns=await initMcp();
   if(!ns){ st.textContent="Open this page in claude.ai with the Webull connector to load option chains."; return; }
@@ -395,7 +396,7 @@ async function loadChain(sym){
       arrp(r).forEach(o=>{if(o&&o.symbol)q[o.symbol]=o;});
       done++; st.textContent="Loading quotes "+done+"/"+batches.length+"…";
     }
-    renderChain(sym,P,MAXEXP,strikes,bk,q);
+    $("optout").innerHTML=renderChain(sym,P,MAXEXP,strikes,bk,q);
     st.textContent="";
   }catch(e){
     const code=e&&e.code; let m="Couldn't load the chain — please retry.";
@@ -425,15 +426,74 @@ function renderChain(sym,P,exp,strikes,bk,q){
       `<td class="strike">${s.toFixed(1)}</td>`+
       `<td class="prem${pinv[i]?' inv':''}">${p.prem}</td><td>${p.bid}</td><td>${p.ask}</td><td>${p.d}</td><td>${p.iv}</td><td>${p.oi}</td></tr>`;
   }).join("");
-  $("optout").innerHTML=`<div class="opthdr"><b>${sym}</b> &nbsp;$${P.toFixed(2)}&nbsp; · &nbsp;exp <b>${exp}</b> (${days}d, longest listed) · ATM strike shaded · <span style="background:rgba(255,206,0,.28);padding:0 .25rem;border-radius:3px">yellow</span> = premium inversion vs adjacent strike</div>`+
+  return `<div class="opthdr"><b>${sym}</b> &nbsp;$${P.toFixed(2)}&nbsp; · &nbsp;exp <b>${exp}</b> (${days}d, longest listed) · ATM strike shaded · <span style="background:rgba(255,206,0,.28);padding:0 .25rem;border-radius:3px">yellow</span> = premium inversion vs adjacent strike</div>`+
     `<div class="tablewrap"><table class="chain"><thead>`+
     `<tr><th class="callhd" colspan="6">Calls</th><th>Strike</th><th class="puthd" colspan="6">Puts</th></tr>`+
     `<tr><th>OI</th><th>IV</th><th>δ</th><th>Bid</th><th>Ask</th><th>Prem</th><th>·</th><th>Prem</th><th>Bid</th><th>Ask</th><th>δ</th><th>IV</th><th>OI</th></tr>`+
     `</thead><tbody>${rows}</tbody></table></div>`;
 }
+async function scanSource(){
+  const st=$("optstat"), out=$("optout");
+  if(optScan){ optScanStop=true; st.textContent="Stopping…"; return; }
+  if(optLoading)return;
+  const ns=await initMcp();
+  if(!ns){ st.textContent="Open this page in claude.ai with the Webull connector to scan."; return; }
+  const arrp=r=>{let a=r&&r.payload; if(!Array.isArray(a))a=(a&&a.data)||[]; return a;};
+  const src=$("optsrc").value||"swing";
+  const label=(OPTSRC.find(s=>s[0]===src)||["",src])[1];
+  const names=[...new Set((DS[src]||[]).map(r=>r.sym).filter(Boolean))];
+  if(!names.length){ st.textContent="No names in this source."; return; }
+  optScan=true; optScanStop=false; $("optscan").textContent="Stop scan"; $("optload").disabled=true;
+  out.innerHTML=`<div class="opthdr" id="optscanhd"><b>${label}</b> — scanning ${names.length} names at their longest-dated expiry (strikes within ±20% of spot) for premium inversions…</div><div id="optscanbody"></div>`;
+  const body=$("optscanbody");
+  const mid=o=>{const b=num(o&&o.bid),a=num(o&&o.ask);return (b!=null&&a!=null)?(b+a)/2:num(o&&o.price);};
+  const liq=o=>o&&num(o.bid)!=null&&num(o.bid)>0&&num(o.open_interest)!=null&&num(o.open_interest)>0;
+  let done=0, skipped=0; const found=[];
+  for(const sym of names){
+    if(optScanStop) break;
+    done++; st.textContent="Scanning "+done+"/"+names.length+" ("+sym+") · "+found.length+" found";
+    try{
+      const sres=await ns.callTool("Webull","get_stock_snapshot",{symbols:sym,category:"US_STOCK",extend_hour_required:false,overnight_required:false},{cache:false});
+      const sarr=arrp(sres); const P=sarr.length?num(sarr[0].price):null;
+      if(!P){ skipped++; continue; }
+      const lo1=Math.max(1,Math.round(P*0.97)), hi1=Math.round(P*1.03)+1;
+      const cres=await ns.callTool("Webull","get_option_contracts",{category:"US_OPTION",underlying_symbols:sym,direction:"CALL",strike_price_gte:String(lo1),strike_price_lte:String(hi1),page_size:1000},{cache:false});
+      const exps=[...new Set(arrp(cres).map(c=>c.expiration_date).filter(Boolean))].sort();
+      if(!exps.length){ skipped++; continue; }
+      const MAXEXP=exps[exps.length-1];
+      const lo2=Math.max(1,Math.round(P*0.8)), hi2=Math.round(P*1.2);
+      const chr=await ns.callTool("Webull","get_option_contracts",{category:"US_OPTION",underlying_symbols:sym,start_date:MAXEXP,strike_price_gte:String(lo2),strike_price_lte:String(hi2),page_size:1000},{cache:false});
+      const chc=arrp(chr).filter(c=>c.expiration_date===MAXEXP);
+      if(!chc.length){ skipped++; continue; }
+      const bk={};
+      chc.forEach(c=>{const k=(+c.strike_price).toFixed(2);(bk[k]=bk[k]||{})[c.option_type==="PUT"?"put":"call"]=c.symbol;});
+      let strikes=Object.keys(bk).map(Number);
+      strikes.sort((a,b)=>Math.abs(a-P)-Math.abs(b-P)); strikes=strikes.slice(0,24).sort((a,b)=>a-b);
+      const osyms=[]; strikes.forEach(s=>{const b2=bk[s.toFixed(2)]||{}; if(b2.call)osyms.push(b2.call); if(b2.put)osyms.push(b2.put);});
+      const q={};
+      for(const bb of chunk(osyms,20)){ const r=await ns.callTool("Webull","get_option_snapshot",{symbols:bb.join(","),category:"US_OPTION"},{cache:false}); arrp(r).forEach(o=>{if(o&&o.symbol)q[o.symbol]=o;}); }
+      const cm=strikes.map(s=>mid(q[(bk[s.toFixed(2)]||{}).call]));
+      const pm=strikes.map(s=>mid(q[(bk[s.toFixed(2)]||{}).put]));
+      let hit=false;
+      for(let i=1;i<strikes.length&&!hit;i++){ if(cm[i]!=null&&cm[i-1]!=null&&cm[i]>cm[i-1]+1e-9&&liq(q[(bk[strikes[i].toFixed(2)]||{}).call])) hit=true; }
+      for(let i=0;i<strikes.length-1&&!hit;i++){ if(pm[i]!=null&&pm[i+1]!=null&&pm[i]>pm[i+1]+1e-9&&liq(q[(bk[strikes[i].toFixed(2)]||{}).put])) hit=true; }
+      if(hit){ found.push(sym); body.insertAdjacentHTML("beforeend",`<div style="margin-top:1.1rem;padding-top:.4rem;border-top:1px solid var(--line)">`+renderChain(sym,P,MAXEXP,strikes,bk,q)+`</div>`); }
+    }catch(e){
+      const c=e&&e.code;
+      if(c==="needs_reauth"||c==="server_not_connected"||c==="not_granted"||c==="not_in_manifest"||c==="consent_required"||c==="approval_required"){ st.textContent="Connector issue — reconnect/allow Webull for this page, then rescan."; optScanStop=true; break; }
+      skipped++; continue;
+    }
+  }
+  const hd=$("optscanhd");
+  if(hd){ const stopped=(optScanStop&&done<names.length)?" · stopped early":"";
+    hd.innerHTML=`<b>${label}</b> — ${found.length} name${found.length===1?"":"s"} with premium inversions, out of ${done} scanned${skipped?(" · "+skipped+" skipped (no options/quote)"):""}${stopped}. Longest-dated expiry, strikes within ±20% of spot · <span style="background:rgba(255,206,0,.28);padding:0 .25rem;border-radius:3px">yellow</span> = inverted premium vs adjacent strike. Stale/wide-spread wing quotes to verify live, not trade signals.`; }
+  if(!found.length) body.innerHTML=`<p style="color:var(--ink-soft);font-size:.85rem;margin:.5rem 0">No premium inversions found${optScanStop?" before stopping":""}.</p>`;
+  st.textContent=""; optScan=false; optScanStop=false; $("optscan").textContent="Scan source for inversions"; $("optload").disabled=false;
+}
 $("optsrc").addEventListener("change",populateOptSyms);
 $("optfree").addEventListener("keydown",e=>{if(e.key==="Enter"){const f=$("optfree").value.trim().toUpperCase();if(f)loadChain(f);}});
 $("optload").addEventListener("click",()=>{const f=$("optfree").value.trim().toUpperCase();loadChain(f||$("optsym").value);});
+$("optscan").addEventListener("click",scanSource);
 $("refreshBtn").addEventListener("click",()=>refreshTab(cur));
 $("rescanBtn").addEventListener("click",rescan);
 initMcp();
